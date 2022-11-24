@@ -3,11 +3,15 @@
 
 #include "BlasterCharacter.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "EnhancedInputSubsystems.h"
+#include "EnhancedInputComponent.h"
 #include "Camera/CameraComponent.h"
 
 ABlasterCharacter::ABlasterCharacter()
 {
 	PrimaryActorTick.bCanEverTick = true;
+
+	TurnRateGamepad = 45.f;
 
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(GetMesh());
@@ -22,47 +26,83 @@ ABlasterCharacter::ABlasterCharacter()
 void ABlasterCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	if (APlayerController* PlayerController = Cast<APlayerController>(GetController()))
+	{
+		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PlayerController->GetLocalPlayer()))
+		{
+			Subsystem->AddMappingContext(BlasterMappingContext, 0);
+		}
+	}
 }
 
 void ABlasterCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-	PlayerInputComponent->BindAction("Jump", IE_Pressed, this, &ACharacter::Jump);
-
-	PlayerInputComponent->BindAxis("MoveForward", this, &ABlasterCharacter::MoveForward);
-	PlayerInputComponent->BindAxis("MoveRight", this, &ABlasterCharacter::MoveRight);
-	PlayerInputComponent->BindAxis("Turn", this, &ABlasterCharacter::Turn);
-	PlayerInputComponent->BindAxis("LookUp", this, &ABlasterCharacter::LookUp);
-}
-
-void ABlasterCharacter::MoveForward(float Value)
-{
-	if (Controller != nullptr && Value != 0.f)
+	if (UEnhancedInputComponent* EnhancedInputComponent = CastChecked<UEnhancedInputComponent>(PlayerInputComponent))
 	{
-		const FRotator YawRotation(0.f, Controller->GetControlRotation().Yaw, 0.f);
-		const FVector Direction(FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X));
-		AddMovementInput(Direction, Value);
-	}
-}
-void ABlasterCharacter::MoveRight(float Value)
-{
-	if (Controller != nullptr && Value != 0.f)
-	{
-		const FRotator YawRotation(0.f, Controller->GetControlRotation().Yaw, 0.f);
-		const FVector Direction(FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y));
-		AddMovementInput(Direction, Value);
+		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Triggered, this, &ACharacter::Jump);
+		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
+
+		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ABlasterCharacter::Input_Move);
+
+		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &ABlasterCharacter::Input_Look);
 	}
 }
 
-void ABlasterCharacter::Turn(float Value)
+void ABlasterCharacter::Input_Move(const FInputActionValue& InputActionValue)
 {
-	AddControllerYawInput(Value);
+	if (Controller != nullptr)
+	{
+		const FVector2D MoveValue = InputActionValue.Get<FVector2D>();
+		const FRotator MovementRotation(0.0f, Controller->GetControlRotation().Yaw, 0.0f);
+
+		if (MoveValue.X != 0.0f)
+		{
+			const FVector MovementDirection = MovementRotation.RotateVector(FVector::RightVector);
+			AddMovementInput(MovementDirection, MoveValue.X);
+		}
+
+		if (MoveValue.Y != 0.0f)
+		{
+			const FVector MovementDirection = MovementRotation.RotateVector(FVector::ForwardVector);
+			AddMovementInput(MovementDirection, MoveValue.Y);
+		}
+	}
 }
 
-void ABlasterCharacter::LookUp(float Value)
+void ABlasterCharacter::Input_Look(const FInputActionValue& InputActionValue)
 {
-	AddControllerPitchInput(Value);
+	if (Controller != nullptr)
+	{
+		const FVector2D LookValue = InputActionValue.Get<FVector2D>();
+
+		if (LookValue.X != 0.0f)
+		{
+			TurnAtRate(LookValue.X);
+		}
+
+		if (LookValue.Y != 0.0f)
+		{
+			LookUpAtRate(LookValue.Y);
+		}
+	}
+}
+
+void ABlasterCharacter::Input_Jump(const FInputActionValue& InputActionValue)
+{
+	Jump();
+}
+
+void ABlasterCharacter::TurnAtRate(float Rate)
+{
+	AddControllerYawInput(Rate * TurnRateGamepad * GetWorld()->GetDeltaSeconds());
+}
+
+void ABlasterCharacter::LookUpAtRate(float Rate)
+{
+	AddControllerPitchInput(Rate * TurnRateGamepad * GetWorld()->GetDeltaSeconds());
 }
 
 void ABlasterCharacter::Tick(float DeltaTime)
